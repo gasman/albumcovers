@@ -24,21 +24,47 @@ end
 
 module Flickr
 	@flickr = Net::Flickr.new(FLICKR_API_KEY)
-	def self.photos
-		if @flickr_last_fetch.nil? or @flickr_last_fetch < 1.hour.ago
-			@flickr_photos = @flickr.photos.search(
-				:sort => 'interestingness-desc', :min_upload_date => 7.days.ago.to_i, :per_page => 500)
-			@flickr_last_fetch = Time.now
+	
+	def self.photos(licenses)
+		@flickr_last_fetch ||= {}
+		@flickr_photos ||= {}
+		
+		if @flickr_last_fetch[licenses].nil? or @flickr_last_fetch[licenses] < 1.hour.ago
+			@flickr_photos[licenses] = @flickr.photos.search(
+				:sort => 'interestingness-desc', :min_upload_date => 7.days.ago.to_i, :per_page => 500, :license => licenses.join(','))
+			@flickr_last_fetch[licenses] = Time.now
 		end
-		@flickr_photos
+		@flickr_photos[licenses]
+	end
+	
+	def self.licenses
+		if @licenses_last_fetch.nil? or @licenses_last_fetch < 6.hours.ago
+			licenses_doc = Hpricot.XML(open("http://api.flickr.com/services/rest/?api_key=#{FLICKR_API_KEY}&method=flickr.photos.licenses.getInfo"))
+			@licenses = licenses_doc / 'license'
+		end
+		@licenses
+	end
+	
+	def self.username(nsid)
+		person = Hpricot.XML(open("http://api.flickr.com/services/rest/?api_key=#{FLICKR_API_KEY}&method=flickr.people.getInfo&user_id=#{nsid}"))
+		(person % 'username').inner_text
 	end
 end
 
 module AlbumCovers::Controllers
 	class Index < R '/'
 		
+		DEFAULT_LICENSES = %w(1 2 4 5)
+		
 		def get
-			@photo = Flickr.photos[rand(500)]
+			@licenses = (@input['license'] || DEFAULT_LICENSES).to_a
+			
+			photos = Flickr.photos(@licenses)
+			if photos.total == 0
+				photos = Flickr.photos(DEFAULT_LICENSES)
+				@warning = true
+			end
+			@photo = photos[rand(photos.total < 500 ? photos.total : 500)]
 			
 			@band_name = Wikipedia.random_title
 			@album_title = QuotationsPage.random_quote.match(/(\w+\W+\w+\W+\w+\W+\w+)\W*$/)[1]
@@ -46,6 +72,7 @@ module AlbumCovers::Controllers
 			@colour1 = rand(0xffffff).to_s(16)
 			@colour2 = rand(0xffffff).to_s(16)
 			@colour3 = rand(0xffffff).to_s(16)
+			
 			render :index
 		end
 	end
@@ -60,24 +87,43 @@ module AlbumCovers::Views
 					html {
 						font-family: helvetica, arial, sans-serif;
 					}
+					.heading h1 {
+						text-align: center;
+						border-bottom: 1px solid #ccc;
+					}
+					.result {
+						float: left;
+						width: 440px;
+						margin-bottom: 20px;
+					}
 					.album {
 						width: 400px;
 						height: 400px;
 						border: 1px solid #888;
 						position: relative;
 						overflow: hidden;
+						background-repeat: no-repeat;
+						background-position: center;
 					}
 					.album h1 {
 						position: absolute;
 						bottom: 20px;
 						left: 10px;
-						font-size: 30px;
+						font-size: 32px;
+						-webkit-text-stroke: 1px black;
+						letter-spacing: -1px;
 					}
 					.album h2 {
 						position: absolute;
 						top: 350px;
 						left: 15px;
-						font-size: 20px;
+						font-size: 22px;
+						-webkit-text-stroke: 0.5px black;
+						letter-spacing: -0.5px;
+					}
+					p.credit {
+						font-size: 0.6em;
+						color: #666666;
 					}
 				], :type => 'text/css'
 			end
@@ -88,10 +134,40 @@ module AlbumCovers::Views
 	end
 
 	def index
-		div :class => 'album', :style => "background-color: ##{@colour1}" do
-			h1 @band_name, :style => "color: ##{@colour2}"
-			h2 @album_title, :style => "color: ##{@colour3}"
-			img :src => @photo.source_url
+		div.heading do
+			h1 "Album Cover Generator"
+		end
+		if @warning
+			p "No photos found with the selected licenses! Reverting to default set"
+		end
+		div.result do
+			div.album :style => "background-color: ##{@colour1}; background-image: url(#{@photo.source_url})" do
+				h1 @band_name, :style => "color: ##{@colour2}"
+				h2 @album_title, :style => "color: ##{@colour3}"
+			end
+			p.credit do
+				text "Picture credit: "
+				a "#{Flickr.username(photo.owner)} - \"#{photo.title}\"", :href => @photo.page_url
+			end
+		end
+		form :action => '.', :method => 'get' do
+			fieldset do
+				legend "Photo licenses to include"
+				ul do
+					for license in Flickr.licenses
+						li do
+							if @licenses.include?(license['id'])
+								# If there's a better way to do conditional attributes, the Markaby documentation doesn't tell me what it is. FUCK MARKABY.
+								input :type => 'checkbox', :name => 'license', :value => license['id'], :id => "license_#{license['id']}", :checked => true
+							else
+								input :type => 'checkbox', :name => 'license', :value => license['id'], :id => "license_#{license['id']}"
+							end
+							label license['name'], :for => "license_#{license['id']}"
+						end
+					end
+				end
+			end
+			input :type => 'submit', :value => "Get another cover"
 		end
 	end
 end
