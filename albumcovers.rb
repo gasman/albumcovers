@@ -122,8 +122,14 @@ module AlbumCovers::Views
 						letter-spacing: -0.5px;
 					}
 					p.credit {
-						font-size: 0.6em;
+						font-size: 0.7em;
 						color: #666666;
+					}
+					p.site_credit {
+						font-size: 0.7em;
+						clear: both;
+						background-color: #ccc;
+						padding: 4px;
 					}
 				], :type => 'text/css'
 			end
@@ -168,6 +174,13 @@ module AlbumCovers::Views
 				end
 			end
 			input :type => 'submit', :value => "Get another cover"
+		end
+		p.site_credit do
+			text "A "
+			a "Matt.West.co.tt", :href => 'http://matt.west.co.tt/'
+			text " production. You should "
+			a "follow me on Twitter", :href => 'http://twitter.com/westdotcodottt'
+			text '.'
 		end
 	end
 end
